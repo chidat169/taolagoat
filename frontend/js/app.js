@@ -142,14 +142,36 @@ function createEdgePopup(p) {
     const lineColor = METRO[p.line]?.color || '#888';
     return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:${lineColor}"></span><span class="font-semibold text-base">${li.name}</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(p.start)} ↔ ${getNodeName(p.end)}</div><div class="text-sm text-slate-400">Length: ${p.length.toFixed(0)}m • ${p.active ? '<span class="text-emerald-500">Active</span>' : '<span class="text-red-400">Inactive</span>'}</div></div>`;
 }
-function createPathEdgePopup(p) {
+function createPathEdgePopup(p, startChildId, endChildId) {
     const isTransfer = p.line === 'transfer';
     if (isTransfer) {
-        return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:#9ca3af"></span><span class="font-semibold text-base">Transfer</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(p.start)} ↔ ${getNodeName(p.end)}</div></div>`;
+        let sLine = '?', eLine = '?';
+        if (startChildId && endChildId) {
+            sLine = childNodeMap[startChildId]?.line;
+            eLine = childNodeMap[endChildId]?.line;
+        } else {
+            sLine = childNodeMap[p.start]?.line;
+            eLine = childNodeMap[p.end]?.line;
+        }
+        const slInfo = METRO[sLine] || { name: `Line ${sLine}`, color: '#888' };
+        const elInfo = METRO[eLine] || { name: `Line ${eLine}`, color: '#888' };
+        
+        return `<div class="p-3">
+            <div class="flex items-center gap-2 mb-2">
+                <span class="font-semibold text-base text-slate-700">Transfer</span>
+                <span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-xs font-medium">
+                <span class="px-1.5 py-0.5 rounded text-white shadow-sm" style="background:${slInfo.color}">${slInfo.name}</span>
+                <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                <span class="px-1.5 py-0.5 rounded text-white shadow-sm" style="background:${elInfo.color}">${elInfo.name}</span>
+            </div>
+        </div>`;
     }
     const li = METRO[p.line] || { name: `Line ${p.line}` };
     const lineColor = METRO[p.line]?.color || '#888';
-    return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:${lineColor}"></span><span class="font-semibold text-base">${li.name}</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(p.start)} → ${getNodeName(p.end)}</div><div class="text-sm text-slate-400">Length: ${parseFloat(p.length).toFixed(0)}m</div></div>`;
+    
+    return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:${lineColor}"></span><span class="font-semibold text-base">${li.name}</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(p.start)} ↔ ${getNodeName(p.end)}</div><div class="text-sm text-slate-400 mt-0.5">Length: ${parseFloat(p.length).toFixed(0)}m</div></div>`;
 }
 function createPathNodePopup(p) {
     return `<div class="p-3"><div class="font-semibold text-base mb-0.5">${p.name}</div></div>`;
@@ -250,7 +272,7 @@ function displayPath(data) {
     const allCoords = [];
 
     // Draw edges
-    segmentIds.forEach(segId => {
+    segmentIds.forEach((segId, idx) => {
         const edge = edgeLookup[segId];
         if (!edge) return;
         const p = edge.properties;
@@ -258,6 +280,9 @@ function displayPath(data) {
         const lineColor = isTransfer ? '#3b82f6' : (METRO[p.line]?.color || '#888');
         const coords = edge.geometry.coordinates.map(c => [c[1], c[0]]);
         allCoords.push(...coords);
+
+        const startChildId = pathChildIds[idx];
+        const endChildId = pathChildIds[idx + 1];
 
         // Glow effect
         L.polyline(coords, { color: lineColor, weight: 16, opacity: 0.2 }).addTo(pathLayer);
@@ -268,7 +293,7 @@ function displayPath(data) {
             lineCap: 'round', lineJoin: 'round',
             dashArray: isTransfer ? '8, 12' : null
         });
-        mainLine.bindPopup(createPathEdgePopup(p));
+        mainLine.bindPopup(createPathEdgePopup(p, startChildId, endChildId));
         mainLine.on('mouseover', function () { this.setStyle({ weight: 14 }); });
         mainLine.on('mouseout', function () { this.setStyle({ weight: 10 }); });
         mainLine.addTo(pathLayer);
@@ -495,7 +520,6 @@ function populateLineFilter() {
     const sel = document.getElementById('edge-line-filter');
     const sorted = Array.from(allLineNames).filter(l => l !== 'transfer').sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999) || a.localeCompare(b));
     sel.innerHTML = '<option value="all">All lines</option>' +
-        '<option value="transfer">Transfer</option>' +
         sorted.map(l => {
             const info = METRO[l] || { name: `Line ${l}` };
             return `<option value="${l}">${info.name}</option>`;
@@ -505,13 +529,14 @@ function renderEdgesList() {
     const c = document.getElementById('edges-list');
     const lineF = document.getElementById('edge-line-filter').value;
     const idQ = (document.getElementById('edge-search-id')?.value || '').trim();
-    let filtered = [...edgesData];
+    let baseEdges = edgesData.filter(e => e.properties.line !== 'transfer');
+    let filtered = [...baseEdges];
     if (lineF !== 'all') filtered = filtered.filter(e => e.properties.line === lineF);
     if (idQ) filtered = filtered.filter(e => e.properties.id.toString() === idQ);
     if (edgeStatusFilter === 'active') filtered = filtered.filter(e => e.properties.active === true);
     else if (edgeStatusFilter === 'inactive') filtered = filtered.filter(e => e.properties.active === false);
     filtered.sort((a, b) => a.properties.id - b.properties.id);
-    document.getElementById('edge-count').textContent = `${filtered.length} / ${edgesData.length} segments`;
+    document.getElementById('edge-count').textContent = `${filtered.length} / ${baseEdges.length} segments`;
     if (!filtered.length) { c.innerHTML = '<div class="text-center text-sm text-slate-400 py-8">No segments found</div>'; return; }
     c.innerHTML = filtered.map(e => {
         const p = e.properties;
@@ -755,7 +780,15 @@ document.addEventListener('click', e => {
     if (!e.target.closest('#input-start') && !e.target.closest('#suggestions-start')) document.getElementById('suggestions-start')?.classList.add('hidden');
     if (!e.target.closest('#input-end') && !e.target.closest('#suggestions-end')) document.getElementById('suggestions-end')?.classList.add('hidden');
 });
+
 async function initApp() {
+    // Clear inputs to prevent browser caching values on reload
+    document.getElementById('input-start').value = '';
+    document.getElementById('input-end').value = '';
+    if (document.getElementById('edge-search-id')) document.getElementById('edge-search-id').value = '';
+    if (document.getElementById('station-search')) document.getElementById('station-search').value = '';
+    if (document.getElementById('edge-line-filter')) document.getElementById('edge-line-filter').value = 'all';
+    
     initMap();
     try {
         [nodesData, edgesData] = await Promise.all([fetchNodes(), fetchEdges()]);
