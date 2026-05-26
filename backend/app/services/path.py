@@ -4,8 +4,15 @@ from app.schemas.path import Path
 
 async def get_node_map() -> dict:
     node_map = {}
-    starts = await db.edges.distinct("properties.start")
-    ends = await db.edges.distinct("properties.end")
+    valid_edge_filter = {
+        "$or": [
+            {"properties.line": "transfer"},
+            {"properties.active": True}
+        ]
+    }
+
+    starts = await db.edges.distinct("properties.start", valid_edge_filter)
+    ends = await db.edges.distinct("properties.end", valid_edge_filter)
     connected_child_ids = set(starts + ends)
 
     cursor = db.nodes.find(
@@ -25,13 +32,16 @@ async def get_node_map() -> dict:
                 node_map[child_id] = (coordinates[0], coordinates[1])
     return node_map
 
-async def get_graph(penalty: float) -> dict:
+async def get_graph(penalty: float, node_map: dict) -> dict:
+    valid_child_ids = set(node_map.keys())
     graph = {}
-    active_child_ids = set(await db.nodes.distinct("properties.child.id", {"properties.active": True}))
+    for child_id in valid_child_ids:
+        graph[child_id] = []
     
     cursor_edges = db.edges.find(
         {},
         {
+            "properties.id": 1,
             "properties.start": 1,
             "properties.end": 1,
             "properties.length": 1,
@@ -45,24 +55,18 @@ async def get_graph(penalty: float) -> dict:
         properties = edge["properties"]
         start = properties["start"]
         end = properties["end"]
+        edge_id = properties["id"]
         line = properties["line"]
 
-        if (start in active_child_ids) and (end in active_child_ids):
+        if (start in valid_child_ids) and (end in valid_child_ids):
             if (line != "transfer") and (properties["active"] == False):
                 continue
-
             if line == "transfer":
                 weight = penalty
             else:
                 weight = properties["length"]
-
-            if start not in graph:
-                graph[start] = []
-            graph[start].append((end, weight))
-
-            if end not in graph:
-                graph[end] = []
-            graph[end].append((start, weight))
+            graph[start].append((end, weight, edge_id, line))
+            graph[end].append((start, weight, edge_id, line))
     return graph
 
 async def get_nearest_node(longitude: float, latitude: float, node_map: dict) -> dict:
@@ -106,7 +110,7 @@ def heuristic(start_id: int, target_lon: float, target_lat: float, node_map: dic
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return 6371000 * c
 
-async def a_star(start_lon: float, start_lat: float, end_lon: float, end_lat: float, node_map: dict, graph: dict) -> list[int] | None:
+async def a_star(start_lon: float, start_lat: float, end_lon: float, end_lat: float, node_map: dict, graph: dict) -> Path | None:
     start_data = await get_nearest_node(start_lon, start_lat, node_map)
     end_data = await get_nearest_node(end_lon, end_lat, node_map)
 
@@ -131,65 +135,35 @@ async def a_star(start_lon: float, start_lat: float, end_lon: float, end_lat: fl
 
         if current_node in end_children:
             path = []
-            while current_node is not None:
-                path.append(current_node)
-                current_node = came_from[current_node]
+            segments = []
+            total_length = 0
+            total_transfer = 0
+            
+            curr = current_node
+            while came_from[curr] is not None:
+                path.append(curr)
+                prev_node, weight, edge_id, line = came_from[curr]
+                segments.append(edge_id)
+                
+                if line == "transfer":
+                    total_transfer += 1
+                else:
+                    total_length += weight
+                curr = prev_node
+                
+            path.append(curr)
             path.reverse()
-            return path
+            segments.reverse()
+            return Path(path=path, segments=segments, length=total_length, transfer=total_transfer)
 
         if current_g > g_score.get(current_node, inf):
             continue
 
-        for neighbor, weight in graph[current_node]:
+        for neighbor, weight, edge_id, line in graph[current_node]:
             tentative_g_score = current_g + weight
             if tentative_g_score < g_score.get(neighbor, inf):
                 g_score[neighbor] = tentative_g_score
                 f_score = tentative_g_score + heuristic(neighbor, target_lon, target_lat, node_map)
-                came_from[neighbor] = current_node
+                came_from[neighbor] = (current_node, weight, edge_id, line)
                 heapq.heappush(fringe, (f_score, tentative_g_score, neighbor))
     return None
-
-async def path_output(path: list[int]) -> Path:
-    if len(path) == 1:
-        return Path(path=path, segments=[], length=0, transfer=0)
-
-    conditions = []
-    for i in range(len(path) - 1):
-        u = path[i]
-        v = path[i + 1]
-        conditions.append({"properties.start": u, "properties.end": v})
-        conditions.append({"properties.start": v, "properties.end": u})
-
-    edges = await db.edges.find(
-        {"$or": conditions},
-        {"properties": 1, "_id": 0}
-    ).to_list()
-
-    lookup = {}
-    for edge in edges:
-        properties = edge["properties"]
-        lookup[(properties["start"], properties["end"])] = properties
-        lookup[(properties["end"], properties["start"])] = properties
-
-    edge_ids = []
-    total_length = 0
-    total_transfer = 0
-
-    for i in range(len(path) - 1):
-        u = path[i]
-        v = path[i + 1]
-        
-        edge_info = lookup[(u,v)]
-    
-        edge_ids.append(edge_info.get("id"))
-        if edge_info["line"] == "transfer":
-            total_transfer += 1
-        else:
-            total_length += edge_info["length"]
-
-    return Path(
-        path=path,
-        segments=edge_ids,
-        length=total_length,
-        transfer=total_transfer
-    )
