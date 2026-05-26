@@ -1,9 +1,10 @@
-const API = 'http://127.0.0.1:8000';
+const API = 'http://127.0.0.1:8000/api';
 let map, nodesData = [], edgesData = [], stationMarkers = {}, edgeLayers = {}, pathLayer = null, startMarker = null, endMarker = null;
 let selectedStart = null, selectedEnd = null, selectingPoint = null, allLineNames = new Set(), sidebarOpen = true;
 let edgeStatusFilter = 'all', stationStatusFilter = 'all', edgeLineFilter = 'all';
 let highlightedLine = null, highlightedEdge = null;
 let flatEdgesCache = null, flatStationsCache = null;
+let childToParentMap = {}, childNodeMap = {}, lineChildMarkers = [];
 const METRO = {
     '1': { color: '#FFCD00', name: 'Line 1' }, '2': { color: '#003CA6', name: 'Line 2' }, '3': { color: '#837902', name: 'Line 3' },
     '3bis': { color: '#6EC4E8', name: 'Line 3bis' }, '4': { color: '#CF009E', name: 'Line 4' }, '5': { color: '#FF7E2E', name: 'Line 5' },
@@ -12,6 +13,21 @@ const METRO = {
     '11': { color: '#704B1C', name: 'Line 11' }, '12': { color: '#007852', name: 'Line 12' }, '13': { color: '#6EC4E8', name: 'Line 13' },
     '14': { color: '#62259D', name: 'Line 14' }
 };
+function buildLookupMaps() {
+    childToParentMap = {};
+    childNodeMap = {};
+    nodesData.forEach(node => {
+        const p = node.properties;
+        const parentCoords = node.geometry.coordinates;
+        (p.child || []).forEach(child => {
+            childToParentMap[child.id] = { parentId: p.id, parentName: p.name, parentCoords };
+            childNodeMap[child.id] = {
+                id: child.id, line: child.line, coordinates: child.coordinates,
+                parentId: p.id, parentName: p.name
+            };
+        });
+    });
+}
 function initMap() {
     map = L.map('map', { center: [48.8566, 2.3522], zoom: 13, zoomControl: false, doubleClickZoom: false, preferCanvas: true });
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
@@ -27,7 +43,12 @@ async function fetchPath(a, b, c, d, p) { return await (await fetch(`${API}/path
 async function toggleNodeActive(id, v) { await fetch(`${API}/nodes/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) }); }
 async function toggleEdgeActive(id, v) { await fetch(`${API}/edges/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) }); }
 async function toggleLineActive(l, v) { await fetch(`${API}/lines/${l}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) }); }
-function getNodeName(id) { const n = nodesData.find(n => n.properties.id === id); return n ? n.properties.name : `#${id}`; }
+function getNodeName(id) {
+    const child = childToParentMap[id];
+    if (child) return child.parentName;
+    const n = nodesData.find(n => n.properties.id === id);
+    return n ? n.properties.name : `#${id}`;
+}
 function renderEdges(edges) {
     if (Object.keys(edgeLayers).length > 0) {
         Object.values(edgeLayers).flat().forEach(e => { if (map.hasLayer(e.layer)) map.removeLayer(e.layer); });
@@ -35,17 +56,36 @@ function renderEdges(edges) {
     edgeLayers = {};
     flatEdgesCache = null;
     L.geoJSON(edges, {
-        style: (f) => ({
-            color: f.properties.color || '#888',
-            weight: f.properties.active ? 8 : 4,
-            opacity: f.properties.active ? 0.85 : 0.25,
-            lineJoin: 'round', lineCap: 'round'
-        }),
+        style: (f) => {
+            const p = f.properties;
+            const isTransfer = p.line === 'transfer';
+            if (isTransfer) {
+                return { color: '#9ca3af', weight: 3, opacity: 0.3, dashArray: '6, 6', lineJoin: 'round', lineCap: 'round' };
+            }
+            const lineColor = METRO[p.line]?.color || '#888';
+            return {
+                color: lineColor,
+                weight: p.active ? 8 : 4,
+                opacity: p.active ? 0.85 : 0.25,
+                lineJoin: 'round', lineCap: 'round'
+            };
+        },
         onEachFeature: (f, layer) => {
             const p = f.properties;
+            const isTransfer = p.line === 'transfer';
             allLineNames.add(p.line);
-            layer.on('mouseover', function () { if (!pathLayer && !selectingPoint) this.setStyle({ weight: p.active ? 12 : 7 }); });
-            layer.on('mouseout', function () { if (!pathLayer && !selectingPoint) this.setStyle({ weight: p.active ? 8 : 4 }); });
+            layer.on('mouseover', function () {
+                if (!pathLayer && !selectingPoint) {
+                    if (isTransfer) this.setStyle({ weight: 5 });
+                    else this.setStyle({ weight: p.active ? 12 : 7 });
+                }
+            });
+            layer.on('mouseout', function () {
+                if (!pathLayer && !selectingPoint) {
+                    if (isTransfer) this.setStyle({ weight: 3 });
+                    else this.setStyle({ weight: p.active ? 8 : 4 });
+                }
+            });
             layer.on('click', function (e) {
                 L.DomEvent.stopPropagation(e);
                 if (selectingPoint) {
@@ -75,12 +115,12 @@ function renderNodes(nodes) {
         onEachFeature: (f, layer) => {
             const p = f.properties;
             const c = f.geometry.coordinates;
-            layer.on('mouseover', function () { 
-                this.setRadius(9); 
+            layer.on('mouseover', function () {
+                this.setRadius(9);
                 if (selectingPoint) this.openPopup();
             });
-            layer.on('mouseout', function () { 
-                this.setRadius(6); 
+            layer.on('mouseout', function () {
+                this.setRadius(6);
                 if (selectingPoint) this.closePopup();
             });
             layer.bindPopup(createNodePopup(p));
@@ -94,13 +134,22 @@ function createNodePopup(p) {
     return `<div class="p-3"><div class="font-semibold text-base mb-0.5">${p.name}</div><div class="text-sm text-slate-400 mb-2">${p.active ? '<span class="text-emerald-500">Active</span>' : '<span class="text-red-400">Inactive</span>'}</div></div>`;
 }
 function createEdgePopup(p) {
+    const isTransfer = p.line === 'transfer';
+    if (isTransfer) {
+        return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:#9ca3af"></span><span class="font-semibold text-base">Transfer</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(p.start)} ↔ ${getNodeName(p.end)}</div></div>`;
+    }
     const li = METRO[p.line] || { name: `Line ${p.line}` };
-    return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:${p.color}"></span><span class="font-semibold text-base">${li.name}</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(p.start)} ↔ ${getNodeName(p.end)}</div><div class="text-sm text-slate-400">Length: ${p.length.toFixed(0)}m • ${p.active ? '<span class="text-emerald-500">Active</span>' : '<span class="text-red-400">Inactive</span>'}</div></div>`;
+    const lineColor = METRO[p.line]?.color || '#888';
+    return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:${lineColor}"></span><span class="font-semibold text-base">${li.name}</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(p.start)} ↔ ${getNodeName(p.end)}</div><div class="text-sm text-slate-400">Length: ${p.length.toFixed(0)}m • ${p.active ? '<span class="text-emerald-500">Active</span>' : '<span class="text-red-400">Inactive</span>'}</div></div>`;
 }
-function createPathEdgePopup(p, sId, eId) {
+function createPathEdgePopup(p) {
+    const isTransfer = p.line === 'transfer';
+    if (isTransfer) {
+        return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:#9ca3af"></span><span class="font-semibold text-base">Transfer</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(p.start)} ↔ ${getNodeName(p.end)}</div></div>`;
+    }
     const li = METRO[p.line] || { name: `Line ${p.line}` };
-    const sid = sId || p.start, eid = eId || p.end;
-    return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:${p.color}"></span><span class="font-semibold text-base">${li.name}</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(sid)} → ${getNodeName(eid)}</div><div class="text-sm text-slate-400">Length: ${parseFloat(p.length).toFixed(0)}m</div></div>`;
+    const lineColor = METRO[p.line]?.color || '#888';
+    return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:${lineColor}"></span><span class="font-semibold text-base">${li.name}</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(p.start)} → ${getNodeName(p.end)}</div><div class="text-sm text-slate-400">Length: ${parseFloat(p.length).toFixed(0)}m</div></div>`;
 }
 function createPathNodePopup(p) {
     return `<div class="p-3"><div class="font-semibold text-base mb-0.5">${p.name}</div></div>`;
@@ -192,51 +241,68 @@ async function findPath() {
 function displayPath(data) {
     if (pathLayer) map.removeLayer(pathLayer);
     pathLayer = L.layerGroup().addTo(map);
-    const geoLayer = L.geoJSON(data, {
-        style: (f) => {
-            if (f.geometry.type === 'LineString') {
-                return { color: f.properties.color, weight: 10, opacity: 1, lineCap: 'round', lineJoin: 'round' };
-            }
-        },
-        pointToLayer: (f, latlng) => {
-            if (f.geometry.type === 'Point') {
-                return L.circleMarker(latlng, { radius: 7, fillColor: '#fff', color: '#3b82f6', weight: 3, fillOpacity: 1 });
-            }
-        },
-        onEachFeature: (f, layer) => {
-            if (f.geometry.type === 'LineString') {
-                const glow = L.polyline(layer.getLatLngs(), { color: f.properties.color, weight: 16, opacity: 0.2 }).addTo(pathLayer);
-                let sId = f.properties.start, eId = f.properties.end;
-                const pathSteps = data.properties.path;
-                for (let i = 1; i < pathSteps.length; i++) {
-                    const u = pathSteps[i - 1][0], v = pathSteps[i][0];
-                    if ((f.properties.start === u && f.properties.end === v) || (f.properties.start === v && f.properties.end === u)) {
-                        sId = u; eId = v; break;
-                    }
-                }
-                layer.bindPopup(createPathEdgePopup(f.properties, sId, eId));
-                layer.on('mouseover', function () { this.setStyle({ weight: 14 }); });
-                layer.on('mouseout', function () { this.setStyle({ weight: 10 }); });
-                layer.addTo(pathLayer);
-            } else if (f.geometry.type === 'Point') {
-                layer.on('mouseover', function () { this.setRadius(10); });
-                layer.on('mouseout', function () { this.setRadius(7); });
-                layer.bindPopup(createPathNodePopup(f.properties));
-                layer.addTo(pathLayer);
-            }
-        }
+
+    const edgeLookup = {};
+    edgesData.forEach(e => { edgeLookup[e.properties.id] = e; });
+
+    const pathChildIds = data.path;
+    const segmentIds = data.segments;
+    const allCoords = [];
+
+    // Draw edges
+    segmentIds.forEach(segId => {
+        const edge = edgeLookup[segId];
+        if (!edge) return;
+        const p = edge.properties;
+        const isTransfer = p.line === 'transfer';
+        const lineColor = isTransfer ? '#3b82f6' : (METRO[p.line]?.color || '#888');
+        const coords = edge.geometry.coordinates.map(c => [c[1], c[0]]);
+        allCoords.push(...coords);
+
+        // Glow effect
+        L.polyline(coords, { color: lineColor, weight: 16, opacity: 0.2 }).addTo(pathLayer);
+
+        // Main line
+        const mainLine = L.polyline(coords, {
+            color: lineColor, weight: 10, opacity: 1,
+            lineCap: 'round', lineJoin: 'round',
+            dashArray: isTransfer ? '8, 12' : null
+        });
+        mainLine.bindPopup(createPathEdgePopup(p));
+        mainLine.on('mouseover', function () { this.setStyle({ weight: 14 }); });
+        mainLine.on('mouseout', function () { this.setStyle({ weight: 10 }); });
+        mainLine.addTo(pathLayer);
     });
-    const edges = data.features.filter(f => f.geometry.type === 'LineString');
-    const nodes = data.features.filter(f => f.geometry.type === 'Point');
-    const { total_transfers, length: len } = data.properties;
-    if (edges.length) {
-        const ac = edges.flatMap(e => e.geometry.coordinates.map(c => [c[1], c[0]]));
-        map.fitBounds(L.latLngBounds(ac).pad(0.1), { animate: true, duration: 0.25 });
+
+    // Draw child nodes
+    pathChildIds.forEach(childId => {
+        const child = childNodeMap[childId];
+        if (!child) return;
+        const latlng = [child.coordinates[1], child.coordinates[0]];
+        const marker = L.circleMarker(latlng, {
+            radius: 7, fillColor: '#fff', color: '#3b82f6', weight: 3, fillOpacity: 1
+        });
+        marker.bindPopup(createPathNodePopup({ id: child.parentId, name: child.parentName }));
+        marker.on('mouseover', function () { this.setRadius(10); });
+        marker.on('mouseout', function () { this.setRadius(7); });
+        marker.addTo(pathLayer);
+    });
+
+    // Fit bounds
+    if (allCoords.length) {
+        map.fitBounds(L.latLngBounds(allCoords).pad(0.1), { animate: true, duration: 0.25 });
     }
+
+    // Summary
+    const len = data.length;
     document.getElementById('path-length').textContent = len >= 1000 ? `${(len / 1000).toFixed(2)} km` : `${len.toFixed(0)} m`;
-    document.getElementById('path-transfers').textContent = total_transfers;
-    document.getElementById('transfer-label').textContent = total_transfers === 1 ? 'Transfer' : 'Transfers';
-    buildSteps(data.properties.path, nodes, edges);
+    document.getElementById('path-transfers').textContent = data.transfer;
+    document.getElementById('transfer-label').textContent = data.transfer === 1 ? 'Transfer' : 'Transfers';
+
+    // Build steps
+    buildSteps(data.path, data.segments);
+
+    // UI state
     document.getElementById('path-inputs-area').classList.add('hidden');
     document.getElementById('path-results').classList.remove('hidden');
     document.getElementById('btn-clear-path').classList.remove('hidden');
@@ -261,34 +327,65 @@ function zoomToPath() {
         map.fitBounds(bounds.pad(0.1), { animate: true, duration: 0.5 });
     }
 }
-function buildSteps(path, nodes, edges) {
-    const box = document.getElementById('path-steps'); box.innerHTML = '';
-    const nm = {}; nodes.forEach(n => { nm[n.properties.id] = n; });
-    const lineColors = {}; edges.forEach(e => { lineColors[e.properties.line] = e.properties.color; });
-    if (!path || path.length < 2) return;
-    const startNode = nm[path[0][0]];
-    const startLine = path[1][1];
-    const startColor = lineColors[startLine] || (METRO[startLine]?.color || '#888');
-    if (startNode) box.innerHTML += stepHTML(startNode.properties.id, startNode.properties.name, startLine, startColor, 'start');
-    let currentLine = startLine;
-    for (let i = 1; i < path.length; i++) {
-        const nodeId = path[i][0];
-        const lineId = path[i][1];
-        const color = lineColors[lineId] || (METRO[lineId]?.color || '#888');
-        if (lineId !== currentLine && lineId !== "") {
-            const transferNodeId = path[i - 1][0];
-            const transferNode = nm[transferNodeId];
-            if (transferNode) box.innerHTML += stepHTML(transferNode.properties.id, transferNode.properties.name, lineId, color, 'transfer');
-            currentLine = lineId;
-        }
-        if (i === path.length - 1) {
-            const endNode = nm[nodeId];
-            if (endNode) {
-                const finalColor = lineColors[currentLine] || (METRO[currentLine]?.color || '#888');
-                box.innerHTML += stepHTML(endNode.properties.id, endNode.properties.name, currentLine, finalColor, 'end');
-            }
+function buildSteps(pathChildIds, segmentIds) {
+    const box = document.getElementById('path-steps');
+    box.innerHTML = '';
+    if (!pathChildIds || pathChildIds.length < 2) return;
+
+    const edgeLookup = {};
+    edgesData.forEach(e => { edgeLookup[e.properties.id] = e; });
+
+    // Determine line for each segment
+    const edgeLines = segmentIds.map(id => {
+        const edge = edgeLookup[id];
+        return edge ? edge.properties.line : null;
+    });
+
+    // Find first non-transfer line
+    let currentLine = null;
+    for (let i = 0; i < edgeLines.length; i++) {
+        if (edgeLines[i] && edgeLines[i] !== 'transfer') {
+            currentLine = edgeLines[i];
+            break;
         }
     }
+
+    let startLine = currentLine;
+    if (edgeLines[0] === 'transfer') {
+        const startChild = childNodeMap[pathChildIds[0]];
+        startLine = startChild ? startChild.line : currentLine;
+        currentLine = startLine;
+    }
+
+    // Start step
+    const startChild = childNodeMap[pathChildIds[0]];
+    if (startChild) {
+        const startColor = METRO[startLine]?.color || '#888';
+        box.innerHTML += stepHTML(startChild.parentId, startChild.parentName, startLine, startColor, 'start');
+    }
+
+    // Detect transfers (line changes in non-transfer edges)
+    for (let i = 0; i < segmentIds.length; i++) {
+        const line = edgeLines[i];
+        if (!line || line === 'transfer') continue;
+        if (line !== currentLine) {
+            // Transfer point: the child node at pathChildIds[i] is where the new line starts
+            const transferChild = childNodeMap[pathChildIds[i]];
+            if (transferChild) {
+                const newColor = METRO[line]?.color || '#888';
+                box.innerHTML += stepHTML(transferChild.parentId, transferChild.parentName, line, newColor, 'transfer');
+            }
+            currentLine = line;
+        }
+    }
+
+    // End step
+    const endChild = childNodeMap[pathChildIds[pathChildIds.length - 1]];
+    if (endChild) {
+        const endColor = METRO[currentLine]?.color || '#888';
+        box.innerHTML += stepHTML(endChild.parentId, endChild.parentName, currentLine, endColor, 'end');
+    }
+
     lucide.createIcons();
 }
 function stepHTML(id, name, line, color, type) {
@@ -369,7 +466,7 @@ function swapStations() {
 }
 function renderLinesList() {
     const c = document.getElementById('lines-list');
-    const sorted = Array.from(allLineNames).sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999) || a.localeCompare(b));
+    const sorted = Array.from(allLineNames).filter(l => l !== 'transfer').sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999) || a.localeCompare(b));
     c.innerHTML = sorted.map(l => {
         const info = METRO[l] || { color: '#888', name: `Line ${l}` };
         const le = edgeLayers[l] || [];
@@ -396,11 +493,13 @@ async function handleToggleLine(l, el) {
 }
 function populateLineFilter() {
     const sel = document.getElementById('edge-line-filter');
-    const sorted = Array.from(allLineNames).sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999) || a.localeCompare(b));
-    sel.innerHTML = '<option value="all">All lines</option>' + sorted.map(l => {
-        const info = METRO[l] || { name: `Line ${l}` };
-        return `<option value="${l}">${info.name}</option>`;
-    }).join('');
+    const sorted = Array.from(allLineNames).filter(l => l !== 'transfer').sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999) || a.localeCompare(b));
+    sel.innerHTML = '<option value="all">All lines</option>' +
+        '<option value="transfer">Transfer</option>' +
+        sorted.map(l => {
+            const info = METRO[l] || { name: `Line ${l}` };
+            return `<option value="${l}">${info.name}</option>`;
+        }).join('');
 }
 function renderEdgesList() {
     const c = document.getElementById('edges-list');
@@ -409,14 +508,27 @@ function renderEdgesList() {
     let filtered = [...edgesData];
     if (lineF !== 'all') filtered = filtered.filter(e => e.properties.line === lineF);
     if (idQ) filtered = filtered.filter(e => e.properties.id.toString() === idQ);
-    if (edgeStatusFilter === 'active') filtered = filtered.filter(e => e.properties.active);
-    else if (edgeStatusFilter === 'inactive') filtered = filtered.filter(e => !e.properties.active);
+    if (edgeStatusFilter === 'active') filtered = filtered.filter(e => e.properties.active === true);
+    else if (edgeStatusFilter === 'inactive') filtered = filtered.filter(e => e.properties.active === false);
     filtered.sort((a, b) => a.properties.id - b.properties.id);
     document.getElementById('edge-count').textContent = `${filtered.length} / ${edgesData.length} segments`;
     if (!filtered.length) { c.innerHTML = '<div class="text-center text-sm text-slate-400 py-8">No segments found</div>'; return; }
     c.innerHTML = filtered.map(e => {
         const p = e.properties;
-        const info = METRO[p.line] || { color: '#888', name: `L${p.line}` };
+        const isTransfer = p.line === 'transfer';
+        const info = isTransfer ? { color: '#9ca3af', name: 'Transfer' } : (METRO[p.line] || { color: '#888', name: `L${p.line}` });
+        if (isTransfer) {
+            return `<div class="flex items-center gap-2.5 p-2.5 bg-slate-50 hover:bg-blue-50 rounded-lg border border-slate-200 transition-all group cursor-pointer" onclick="viewEdge(${p.id}, 0.25)">
+                <div class="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0" style="background:${info.color};color:#fff">T</div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                        <div class="text-sm font-medium text-slate-700 truncate">${getNodeName(p.start)} ↔ ${getNodeName(p.end)}</div>
+                        <span class="text-xs font-bold font-mono bg-slate-200 text-slate-600 px-2 py-1 rounded-md ml-auto flex-shrink-0 border border-slate-300">#${p.id}</span>
+                    </div>
+                    <div class="text-xs text-slate-400">Transfer</div>
+                </div>
+            </div>`;
+        }
         return `<div class="flex items-center gap-2.5 p-2.5 bg-slate-50 hover:bg-blue-50 rounded-lg border border-slate-200 transition-all group cursor-pointer" onclick="viewEdge(${p.id}, 0.25)">
             <div class="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0" style="background:${info.color};color:${contrastColor(info.color)}">${p.line}</div>
             <div class="flex-1 min-w-0">
@@ -494,39 +606,87 @@ function updateMapVisibility() {
     const isPathMode = pathLayer !== null;
     if (!flatEdgesCache) flatEdgesCache = Object.values(edgeLayers).flat();
     if (!flatStationsCache) flatStationsCache = Object.values(stationMarkers);
+
+    // Clear previous line child markers
+    lineChildMarkers.forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); });
+    lineChildMarkers = [];
+
+    // Handle edges
     flatEdgesCache.forEach(({ layer, props: p }) => {
         if (isPathMode) {
             if (map.hasLayer(layer)) map.removeLayer(layer);
         } else {
+            const isTransfer = p.line === 'transfer';
             let showEdge = true;
+
+            // In normal mode, hide transfer edges
+            if (highlightedLine === null && isTransfer) showEdge = false;
+            // When line is highlighted, show only that line's edges (hide transfers and other lines)
             if (highlightedLine !== null && p.line !== highlightedLine) showEdge = false;
+
             if (showEdge) {
                 if (!map.hasLayer(layer)) layer.addTo(map);
-                const opacity = p.active ? 0.85 : 0.25;
-                const weight = p.active ? 8 : 4;
-                if (layer.options.opacity !== opacity || layer.options.weight !== weight) {
-                    layer.setStyle({ opacity, weight });
+                if (isTransfer) {
+                    layer.setStyle({ opacity: 0.3, weight: 3 });
+                } else {
+                    const opacity = p.active ? 0.85 : 0.25;
+                    const weight = p.active ? 8 : 4;
+                    if (layer.options.opacity !== opacity || layer.options.weight !== weight) {
+                        layer.setStyle({ opacity, weight });
+                    }
                 }
             } else {
                 if (map.hasLayer(layer)) map.removeLayer(layer);
             }
         }
     });
-    const highlightedLineNodes = highlightedLine !== null ?
-        new Set(edgesData.filter(e => e.properties.line === highlightedLine).flatMap(e => [e.properties.start, e.properties.end])) :
-        null;
-    flatStationsCache.forEach(s => {
-        let showNode = !isPathMode;
-        if (highlightedLine !== null) {
-            showNode = highlightedLineNodes.has(s.props.id);
-        }
-        if (showNode) {
-            if (!map.hasLayer(s.marker)) s.marker.addTo(map);
-            s.marker.bringToFront();
-        } else {
+
+    // Handle nodes
+    if (highlightedLine !== null && !isPathMode) {
+        // Line view: hide parent nodes, show child nodes for highlighted line
+        flatStationsCache.forEach(s => {
             if (map.hasLayer(s.marker)) map.removeLayer(s.marker);
-        }
-    });
+        });
+
+        // Create child node markers for the highlighted line
+        const lineColor = METRO[highlightedLine]?.color || '#0d6efd';
+        const lineName = METRO[highlightedLine]?.name || `Line ${highlightedLine}`;
+        
+        const lineChildIds = new Set();
+        flatEdgesCache.forEach(({ props: p }) => {
+            if (p.line === highlightedLine && p.active) {
+                lineChildIds.add(p.start);
+                lineChildIds.add(p.end);
+            }
+        });
+        
+        lineChildIds.forEach(childId => {
+            const child = childNodeMap[childId];
+            if (child) {
+                const latlng = [child.coordinates[1], child.coordinates[0]];
+                const marker = L.circleMarker(latlng, {
+                    radius: 6, fillColor: '#ffffff', color: lineColor,
+                    weight: 2.2, fillOpacity: 1, opacity: 1
+                });
+                marker.bindPopup(`<div class="p-3"><div class="font-semibold text-base mb-0.5">${child.parentName}</div><div class="text-sm text-slate-400">${lineName}</div></div>`);
+                marker.on('mouseover', function () { this.setRadius(9); });
+                marker.on('mouseout', function () { this.setRadius(6); });
+                marker.addTo(map);
+                lineChildMarkers.push(marker);
+            }
+        });
+    } else {
+        // Normal mode or path mode: show/hide parent nodes
+        flatStationsCache.forEach(s => {
+            let showNode = !isPathMode;
+            if (showNode) {
+                if (!map.hasLayer(s.marker)) s.marker.addTo(map);
+                s.marker.bringToFront();
+            } else {
+                if (map.hasLayer(s.marker)) map.removeLayer(s.marker);
+            }
+        });
+    }
 }
 function viewLine(l, duration = 0.25) {
     const le = edgeLayers[l];
@@ -552,6 +712,7 @@ async function handleToggleStation(id, el) {
     try {
         await toggleNodeActive(id, isActive);
         nodesData = await fetchNodes();
+        buildLookupMaps();
         renderNodes(nodesData);
         renderStationsList();
         viewStation(id, 0);
@@ -598,6 +759,7 @@ async function initApp() {
     initMap();
     try {
         [nodesData, edgesData] = await Promise.all([fetchNodes(), fetchEdges()]);
+        buildLookupMaps();
         renderEdges(edgesData); renderNodes(nodesData);
         renderLinesList(); populateLineFilter(); renderEdgesList(); renderStationsList();
     } catch (e) { console.error(e); alert('Could not connect to server: ' + API); }
