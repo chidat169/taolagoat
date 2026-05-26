@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paris Metro Map</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="font-['Inter'] bg-slate-100 overflow-hidden h-screen w-screen">
+    <div id="app-container" class="flex h-screen w-screen relative">
+        <aside id="sidebar"
+            class="w-[420px] min-w-[420px] h-full bg-white border-r border-slate-200 flex flex-col z-[1000] transition-all duration-300 overflow-hidden shadow-lg">
+            <header class="px-5 py-5 border-b border-slate-100 flex-shrink-0 bg-white">
+                <div class="flex items-center gap-3">
+                    <i data-lucide="train-front" class="w-7 h-7 text-slate-900"></i>
+                    <div>
+                        <h1 class="text-lg font-bold text-slate-900 tracking-tight">Paris Metro Map</h1>
+                    </div>
+                </div>
+            </header>
+            <nav class="px-3 pt-3 flex-shrink-0">
+                <div class="flex bg-slate-100 rounded-xl p-1 gap-0.5">
+                    <button id="tab-pathfinding" onclick="switchTab('pathfinding')"
+                        class="tab-btn flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition-all bg-white text-blue-600 shadow-sm hover:text-slate-700 hover:bg-white">
+                        <i data-lucide="route" class="w-3.5 h-3.5"></i>Path
+                    </button>
+                    <button id="tab-lines" onclick="switchTab('lines')"
+                        class="tab-btn flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all text-slate-500 hover:text-slate-700 hover:bg-white">
+                        <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>Lines
+                    </button>
+                    <button id="tab-edges" onclick="switchTab('edges')"
+                        class="tab-btn flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all text-slate-500 hover:text-slate-700 hover:bg-white">
+                        <i data-lucide="cable" class="w-3.5 h-3.5"></i>Segments
+                    </button>
+                    <button id="tab-stations" onclick="switchTab('stations')"
+                        class="tab-btn flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all text-slate-500 hover:text-slate-700 hover:bg-white">
+                        <i data-lucide="map-pin" class="w-3.5 h-3.5"></i>Stations
+                    </button>
+                </div>
+            </nav>
+            <div class="flex-1 overflow-hidden flex flex-col">
+                <div id="panel-pathfinding" class="tab-panel flex flex-col flex-1 overflow-hidden">
+                    <div class="p-4 space-y-3 flex-shrink-0">
+                        <div id="path-inputs-area" class="space-y-3">
+                            <div class="relative">
+                                <label class="text-xs font-medium text-slate-500 mb-1 block">From</label>
+                                <div class="relative">
+                                    <div
+                                        class="absolute left-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-emerald-500">
+                                    </div>
+                                    <input id="input-start" type="text" placeholder="Search station or click on map..."
+                                        class="w-full pl-8 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all"
+                                        oninput="handleStationSearch(this,'start')"
+                                        onfocus="setSelectingPoint('start'); showSuggestions('start')" />
+                                </div>
+                                <div id="suggestions-start"
+                                    class="suggestions-dropdown absolute w-full mt-1 bg-white border border-slate-100 rounded-xl shadow-xl max-h-48 overflow-y-auto z-50 hidden">
+                                </div>
+                            </div>
+                            <div class="flex justify-center">
+                                <button onclick="swapStations()"
+                                    class="w-9 h-9 rounded-full bg-white border border-slate-200 flex items-center justify-center hover:bg-slate-50 hover:border-slate-300 transition-all group">
+                                    <i data-lucide="arrow-up-down"
+                                        class="w-4 h-4 text-slate-400 group-hover:text-slate-900"></i>
+                                </button>
+                            </div>
+                            <div class="relative">
+                                <label class="text-xs font-medium text-slate-500 mb-1 block">To</label>
+                                <div class="relative">
+                                    <div
+                                        class="absolute left-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-rose-500">
+                                    </div>
+                                    <input id="input-end" type="text" placeholder="Search station or click on map..."
+                                        class="w-full pl-8 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all"
+                                        oninput="handleStationSearch(this,'end')"
+                                        onfocus="setSelectingPoint('end'); showSuggestions('end')" />
+                                </div>
+                                <div id="suggestions-end"
+                                    class="suggestions-dropdown absolute w-full mt-1 bg-white border border-slate-100 rounded-xl shadow-xl max-h-48 overflow-y-auto z-50 hidden">
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <label class="text-xs font-medium text-slate-500">Transfer penalty</label>
+                                <span id="penalty-value"
+                                    class="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">0m</span>
+                            </div>
+                            <input id="penalty-slider" type="range" min="0" max="5000" step="500" value="0"
+                                class="w-full accent-slate-900" oninput="updatePenaltyValue(this.value)" />
+                            <div class="flex justify-between px-[7px] mt-1.5">
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                                <div class="w-[2px] h-1.5 bg-slate-300 rounded-full"></div>
+                            </div>
+                            <div class="flex justify-between mt-1">
+                                <span class="text-xs font-medium text-slate-500">0 (Original A*)</span>
+                                <span class="text-xs font-medium text-slate-500">5000</span>
+                            </div>
+                        </div>
+                        <button id="btn-find-path" onclick="findPath()"
+                            class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-100 transition-all flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
+                            disabled>
+                            <i data-lucide="search" class="w-4 h-4"></i>Find
+                        </button>
+                        <button id="btn-cancel-select" onclick="cancelSelection()"
+                            class="w-full py-3 mt-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-semibold rounded-xl transition-all flex items-center justify-center gap-2 hidden">
+                            <i data-lucide="x-circle" class="w-4 h-4"></i>Cancel
+                        </button>
+                        <button id="btn-clear-path" onclick="clearPath()"
+                            class="w-full py-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl transition-all flex items-center justify-center gap-2 hidden">
+                            <i data-lucide="check" class="w-4 h-4"></i>Done
+                        </button>
+                    </div>
+                    <div id="path-results" class="flex-1 overflow-y-auto px-4 pb-4 hidden">
+                        <div class="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                            <div id="path-summary" class="p-4 border-b border-slate-200">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-500"></i>
+                                    <span class="text-sm font-semibold text-emerald-600">Path found</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div
+                                        class="bg-white rounded-xl p-3 border border-slate-200 flex flex-col items-center text-center shadow-sm cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-all group">
+                                        <div class="flex items-center gap-1.5 mb-1.5">
+                                            <i data-lucide="map"
+                                                class="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500"></i>
+                                            <div
+                                                class="text-[11px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600">
+                                                Total length</div>
+                                        </div>
+                                        <div id="path-length" class="text-xl font-black text-blue-600 leading-none">-
+                                        </div>
+                                    </div>
+                                    <div
+                                        class="bg-white rounded-xl p-3 border border-slate-200 flex flex-col items-center text-center shadow-sm cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-all group">
+                                        <div class="flex items-center gap-1.5 mb-1.5">
+                                            <i data-lucide="git-compare"
+                                                class="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500"></i>
+                                            <div id="transfer-label"
+                                                class="text-[11px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600">
+                                                Transfers</div>
+                                        </div>
+                                        <div id="path-transfers" class="text-xl font-black text-blue-600 leading-none">-
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="path-steps" class="p-4 space-y-0"></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="panel-lines" class="tab-panel hidden flex flex-col flex-1 overflow-hidden">
+                    <div class="p-4 flex-shrink-0">
+                    </div>
+                    <div id="lines-list" class="flex-1 overflow-y-auto px-4 pb-4 space-y-2"></div>
+                </div>
+                <div id="panel-edges" class="tab-panel hidden flex flex-col flex-1 overflow-hidden">
+                    <div class="p-4 flex-shrink-0 space-y-3">
+                        <div class="relative">
+                            <i data-lucide="search"
+                                class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                            <input id="edge-search-id" type="text" placeholder="Enter segment ID..."
+                                class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all"
+                                oninput="filterEdgeList()" />
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-medium text-slate-500 mb-1 block">Filter by line</label>
+                            <select id="edge-line-filter" onchange="filterEdgeList()"
+                                class="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50">
+                                <option value="all">All lines</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-medium text-slate-500 mb-1 block">Status</label>
+                            <div class="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
+                                <button onclick="setEdgeStatusFilter('all')"
+                                    class="edge-status-btn flex-1 py-1.5 text-xs font-semibold rounded-md transition-all bg-white text-slate-900 shadow-sm"
+                                    data-filter="all">All</button>
+                                <button onclick="setEdgeStatusFilter('active')"
+                                    class="edge-status-btn flex-1 py-1.5 text-xs font-medium rounded-md transition-all text-slate-500"
+                                    data-filter="active">Active</button>
+                                <button onclick="setEdgeStatusFilter('inactive')"
+                                    class="edge-status-btn flex-1 py-1.5 text-xs font-medium rounded-md transition-all text-slate-500"
+                                    data-filter="inactive">Inactive</button>
+                            </div>
+                        </div>
+                        <div id="edge-count" class="text-[11px] text-slate-400"></div>
+                    </div>
+                    <div id="edges-list" class="flex-1 overflow-y-auto px-4 pb-4 space-y-1.5"></div>
+                </div>
+                <div id="panel-stations" class="tab-panel hidden flex flex-col flex-1 overflow-hidden">
+                    <div class="p-4 flex-shrink-0 space-y-3">
+                        <div class="relative">
+                            <i data-lucide="search"
+                                class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                            <input id="station-search" type="text" placeholder="Search station..."
+                                class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all"
+                                oninput="filterStations()" />
+                        </div>
+                        <div class="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
+                            <button onclick="setStationStatusFilter('all')"
+                                class="station-status-btn flex-1 py-1.5 text-xs font-semibold rounded-md transition-all bg-white text-slate-900 shadow-sm"
+                                data-filter="all">All</button>
+                            <button onclick="setStationStatusFilter('active')"
+                                class="station-status-btn flex-1 py-1.5 text-xs font-medium rounded-md transition-all text-slate-500"
+                                data-filter="active">Active</button>
+                            <button onclick="setStationStatusFilter('inactive')"
+                                class="station-status-btn flex-1 py-1.5 text-xs font-medium rounded-md transition-all text-slate-500"
+                                data-filter="inactive">Inactive</button>
+                        </div>
+                        <div id="station-count" class="text-[11px] text-slate-400"></div>
+                    </div>
+                    <div id="stations-list" class="flex-1 overflow-y-auto px-4 pb-4 space-y-1"></div>
+                </div>
+            </div>
+        </aside>
+        <button id="sidebar-toggle" onclick="toggleSidebar()"
+            class="absolute top-4 left-[432px] z-[1001] w-8 h-8 bg-white border border-slate-200 rounded-lg flex items-center justify-center hover:bg-blue-50 hover:border-blue-300 transition-all shadow-md">
+            <i data-lucide="panel-left-close" class="w-4 h-4 text-slate-500" id="sidebar-toggle-icon"></i>
+        </button>
+        <div id="map" class="flex-1 h-full"></div>
+        <div id="loading-overlay" class="fixed inset-0 bg-white flex items-center justify-center z-[2000]">
+            <div class="text-center">
+                <div
+                    class="w-14 h-14 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin mx-auto mb-4">
+                </div>
+                <p class="text-base font-semibold text-slate-700">Loading</p>
+            </div>
+        </div>
+        <div id="map-click-toast"
+            class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white border border-slate-200 px-5 py-3 rounded-xl shadow-xl z-[1001] transition-all duration-300 opacity-0 translate-y-4 pointer-events-none">
+            <div class="flex items-center gap-3">
+                <i data-lucide="mouse-pointer-click" class="w-5 h-5 text-blue-600"></i>
+                <span class="text-sm text-slate-600 font-medium">Click map to select <span id="toast-point-type"
+                        class="font-bold text-blue-600">start</span> point</span>
+            </div>
+        </div>
+    </div>
+    <script src="js/app.js"></script>
+</body>
+</html>
