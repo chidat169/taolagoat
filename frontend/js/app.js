@@ -155,22 +155,18 @@ function createPathEdgePopup(p, startChildId, endChildId) {
         }
         const slInfo = METRO[sLine] || { name: `Line ${sLine}`, color: '#888' };
         const elInfo = METRO[eLine] || { name: `Line ${eLine}`, color: '#888' };
-        
+
         return `<div class="p-3">
-            <div class="flex items-center gap-2 mb-2">
-                <span class="font-semibold text-base text-slate-700">Transfer</span>
-                <span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span>
-            </div>
-            <div class="flex items-center gap-1.5 text-xs font-medium">
-                <span class="px-1.5 py-0.5 rounded text-white shadow-sm" style="background:${slInfo.color}">${slInfo.name}</span>
+            <div class="flex items-center gap-1.5 text-sm font-semibold">
+                <span class="px-2 py-1 rounded text-white shadow-sm" style="background:${slInfo.color}">${slInfo.name}</span>
                 <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
-                <span class="px-1.5 py-0.5 rounded text-white shadow-sm" style="background:${elInfo.color}">${elInfo.name}</span>
+                <span class="px-2 py-1 rounded text-white shadow-sm" style="background:${elInfo.color}">${elInfo.name}</span>
             </div>
         </div>`;
     }
     const li = METRO[p.line] || { name: `Line ${p.line}` };
     const lineColor = METRO[p.line]?.color || '#888';
-    
+
     return `<div class="p-3"><div class="flex items-center gap-2 mb-1"><span class="w-3 h-3 rounded-full inline-block" style="background:${lineColor}"></span><span class="font-semibold text-base">${li.name}</span><span class="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md ml-auto">#${p.id}</span></div><div class="text-sm text-slate-400">${getNodeName(p.start)} ↔ ${getNodeName(p.end)}</div><div class="text-sm text-slate-400 mt-0.5">Length: ${parseFloat(p.length).toFixed(0)}m</div></div>`;
 }
 function createPathNodePopup(p) {
@@ -448,20 +444,23 @@ function clearPath() {
     updateBtn();
     updateMapVisibility();
 }
+function removeDiacritics(str) {
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
 function handleStationSearch(input, type) {
-    const q = input.value.toLowerCase().trim(), dd = document.getElementById(`suggestions-${type}`);
+    const q = removeDiacritics(input.value.toLowerCase().trim()), dd = document.getElementById(`suggestions-${type}`);
     if (q.length === 0) {
         if (type === 'start') { selectedStart = null; if (startMarker) { map.removeLayer(startMarker); startMarker = null; } }
         else { selectedEnd = null; if (endMarker) { map.removeLayer(endMarker); endMarker = null; } }
         updateBtn();
     }
     if (q.length < 1) { dd.classList.add('hidden'); return; }
-    const m = nodesData.filter(n => n.properties.active && n.properties.name.toLowerCase().includes(q)).slice(0, 8);
+    const m = nodesData.filter(n => n.properties.active && removeDiacritics(n.properties.name.toLowerCase()).includes(q)).slice(0, 8);
     if (!m.length) { dd.classList.add('hidden'); return; }
     dd.innerHTML = m.map(n => `<div class="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm text-slate-600 hover:text-blue-700 border-b border-slate-100 last:border-0" onclick="selectSuggestion('${type}',${n.properties.id})">${hlMatch(n.properties.name, q)}</div>`).join('');
     dd.classList.remove('hidden');
 }
-function hlMatch(n, q) { const i = n.toLowerCase().indexOf(q); return i < 0 ? n : n.substring(0, i) + '<span class="text-blue-600 font-semibold">' + n.substring(i, i + q.length) + '</span>' + n.substring(i + q.length); }
+function hlMatch(n, q) { const i = removeDiacritics(n.toLowerCase()).indexOf(q); return i < 0 ? n : n.substring(0, i) + '<span class="text-blue-600 font-semibold">' + n.substring(i, i + q.length) + '</span>' + n.substring(i + q.length); }
 function selectSuggestion(t, id) { selectAsPoint(t, id); document.getElementById(`suggestions-${t}`).classList.add('hidden'); }
 function showSuggestions(t) { const i = document.getElementById(`input-${t}`); if (i.value.length > 0) handleStationSearch(i, t); }
 function swapStations() {
@@ -589,9 +588,9 @@ async function handleToggleEdge(id, el) {
 }
 function renderStationsList() {
     const c = document.getElementById('stations-list');
-    const q = (document.getElementById('station-search')?.value || '').toLowerCase().trim();
-    let sorted = [...nodesData].sort((a, b) => a.properties.name.localeCompare(b.properties.name));
-    if (q) sorted = sorted.filter(n => n.properties.name.toLowerCase().includes(q));
+    const q = removeDiacritics((document.getElementById('station-search')?.value || '').toLowerCase().trim());
+    let sorted = [...nodesData].sort((a, b) => a.properties.id - b.properties.id);
+    if (q) sorted = sorted.filter(n => removeDiacritics(n.properties.name.toLowerCase()).includes(q));
     if (stationStatusFilter === 'active') sorted = sorted.filter(n => n.properties.active);
     else if (stationStatusFilter === 'inactive') sorted = sorted.filter(n => !n.properties.active);
     document.getElementById('station-count').textContent = `${sorted.length} / ${nodesData.length} stations`;
@@ -676,7 +675,7 @@ function updateMapVisibility() {
         // Create child node markers for the highlighted line
         const lineColor = METRO[highlightedLine]?.color || '#0d6efd';
         const lineName = METRO[highlightedLine]?.name || `Line ${highlightedLine}`;
-        
+
         const lineChildIds = new Set();
         flatEdgesCache.forEach(({ props: p }) => {
             if (p.line === highlightedLine && p.active) {
@@ -684,16 +683,16 @@ function updateMapVisibility() {
                 lineChildIds.add(p.end);
             }
         });
-        
+
         lineChildIds.forEach(childId => {
             const child = childNodeMap[childId];
             if (child) {
                 const latlng = [child.coordinates[1], child.coordinates[0]];
                 const marker = L.circleMarker(latlng, {
-                    radius: 6, fillColor: '#ffffff', color: lineColor,
+                    radius: 6, fillColor: '#ffffff', color: '#0d6efd',
                     weight: 2.2, fillOpacity: 1, opacity: 1
                 });
-                marker.bindPopup(`<div class="p-3"><div class="font-semibold text-base mb-0.5">${child.parentName}</div><div class="text-sm text-slate-400">${lineName}</div></div>`);
+                marker.bindPopup(`<div class="p-3"><div class="font-semibold text-base mb-0.5">${child.parentName}</div></div>`);
                 marker.on('mouseover', function () { this.setRadius(9); });
                 marker.on('mouseout', function () { this.setRadius(6); });
                 marker.addTo(map);
@@ -788,7 +787,7 @@ async function initApp() {
     if (document.getElementById('edge-search-id')) document.getElementById('edge-search-id').value = '';
     if (document.getElementById('station-search')) document.getElementById('station-search').value = '';
     if (document.getElementById('edge-line-filter')) document.getElementById('edge-line-filter').value = 'all';
-    
+
     initMap();
     try {
         [nodesData, edgesData] = await Promise.all([fetchNodes(), fetchEdges()]);
