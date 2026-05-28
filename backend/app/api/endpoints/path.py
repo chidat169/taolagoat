@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query
-from app.services.path import get_node_map, get_graph, a_star
+from app.services.path import get_node_map, get_graph, get_nearest_node, a_star
 
 router = APIRouter(prefix="/path", tags=["path"])
 
@@ -18,11 +18,19 @@ async def path(
         return {"message": "Path not found"}
     return path
 
+@router.get("/node-map")
+async def node_map():
+    return await get_node_map()
+
 @router.get("/graph")
 async def graph(penalty: int = Query(default=0, ge=0)):
     node_map = await get_node_map()
     return await get_graph(penalty, node_map)
 
-@router.get("/nodemap")
-async def node_map():
-    return await get_node_map()
+@router.get("/nearest-node")
+async def nearest_node(
+    longitude: float = Query(ge=-180, le=180),
+    latitude: float = Query(ge=-90, le=90),
+):
+    node_map = await get_node_map()
+    return await get_nearest_node(longitude, latitude, node_map)

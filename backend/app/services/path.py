@@ -4,15 +4,8 @@ from app.schemas.path import Path
 
 async def get_node_map() -> dict:
     node_map = {}
-    valid_edge_filter = {
-        "$or": [
-            {"properties.line": "transfer"},
-            {"properties.active": True}
-        ]
-    }
-
-    starts = await db.edges.distinct("properties.start", valid_edge_filter)
-    ends = await db.edges.distinct("properties.end", valid_edge_filter)
+    starts = await db.edges.distinct("properties.start", {"properties.active": True})
+    ends = await db.edges.distinct("properties.end", {"properties.active": True})
     connected_child_ids = set(starts + ends)
 
     cursor = db.nodes.find(

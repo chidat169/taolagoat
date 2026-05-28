@@ -27,7 +27,7 @@ async def read_edges() -> EdgeFeatureCollection:
     return EdgeFeatureCollection(features=edges)
 
 async def read_edge(id: int) -> EdgeFeature:
-    edge = await db.edges.find_one({"properties.id": id}, {"_id": 0})
+    edge = await db.edges.find_one({"properties.id": id, "properties.active": {"$exists": True}}, {"_id": 0})
     if not edge:
         return None
     return EdgeFeature.model_validate(edge)

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status, Path, Body
 
-from app.schemas.node import NodeFeatureCollection, NodeFeature
+from app.schemas.node import NodeFeature, NodeFeatureCollection
 from app.crud.node import read_nodes, read_node, update_node_active_status
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
@@ -8,6 +8,14 @@ router = APIRouter(prefix="/nodes", tags=["nodes"])
 @router.get("/", response_model=NodeFeatureCollection)
 async def get_nodes():
     return await read_nodes()
+
+@router.get("/{id}", response_model=NodeFeature)
+async def get_node(id: int = Path(ge=1)):
+    node = await read_node(id)
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+    return node
+
 
 @router.patch("/{id}")
 async def set_node_active_status(id: int = Path(ge=1), active: bool = Body()):
