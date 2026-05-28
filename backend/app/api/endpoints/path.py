@@ -4,7 +4,7 @@ from app.services.path import get_node_map, get_graph, a_star
 router = APIRouter(prefix="/path", tags=["path"])
 
 @router.get("/")
-async def path_finding(
+async def path(
     lon1: float = Query(ge=-180, le=180),
     lat1: float = Query(ge=-90, le=90),
     lon2: float = Query(ge=-180, le=180),
