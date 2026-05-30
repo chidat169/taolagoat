@@ -8,8 +8,9 @@ async def create_collection_edges():
     collections = await db.list_collection_names()
     if "edges" not in collections:
         await db.create_collection("edges")
-        await db.edges.create_index({"properties.id": 1})
-        await db.edges.create_index({"properties.active": 1})
+        await db.edges.create_index({"properties.id": 1}, unique=True)
+        await db.edges.create_index([("properties.active", 1), ("properties.start", 1)])
+        await db.edges.create_index([("properties.active", 1), ("properties.end", 1)])
     if await db.edges.count_documents({}) > 0:
         return
     with open(settings.BASE_DIR / "data" / "edges.json", "r", encoding="utf-8") as f:
