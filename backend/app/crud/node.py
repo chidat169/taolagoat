@@ -10,7 +10,7 @@ async def create_collection_nodes():
         await db.create_collection("nodes")
         await db.nodes.create_index({"geometry": "2dsphere"})
         await db.nodes.create_index({"properties.id": 1}, unique=True)
-        await db.nodes.create_index({"properties.active": 1})
+        await db.nodes.create_index([("properties.active", 1), ("properties.child.id", 1)])
     if await db.nodes.count_documents({}) > 0:
         return
     with open(settings.BASE_DIR / "data" / "nodes.json", "r", encoding="utf-8") as f:
