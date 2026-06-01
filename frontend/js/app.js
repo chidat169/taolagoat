@@ -494,7 +494,7 @@ function renderLinesList() {
     c.innerHTML = sorted.map(l => {
         const info = METRO[l] || { color: '#888', name: `Line ${l}` };
         const le = edgeLayers[l] || [];
-        const active = le.length > 0 && le[0].props.active;
+        const active = le.length > 0 && le.some(e => e.props.active);
         return `<div class="flex items-center gap-3 p-3 bg-slate-50 hover:bg-blue-50 rounded-xl border border-slate-200 transition-all cursor-pointer" onclick="viewLine('${l}')">
             <div class="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shadow-sm flex-shrink-0" style="background:${info.color};color:${contrastColor(info.color)}">${l}</div>
             <div class="flex-1 min-w-0"><div class="font-medium text-base text-slate-700">${info.name}</div><div class="text-xs text-slate-400">${le.length} segments</div></div>
@@ -582,6 +582,7 @@ async function handleToggleEdge(id, el) {
         await toggleEdgeActive(id, isActive);
         edgesData = await fetchEdges();
         renderEdges(edgesData);
+        renderLinesList();
         renderEdgesList();
         viewEdge(id, 0);
     } catch (e) { el.classList.toggle('active'); el.classList.toggle('inactive'); }
